@@ -1,0 +1,5 @@
+fastapi>=0.115
+uvicorn[standard]
+aiosqlite
+httpx
+pydantic>=2
