@@ -26,7 +26,7 @@ class ORMModel(BaseModel):
 class BookingStatus(str, Enum):
     HELD = "held"            # dates reserved, awaiting payment
     CONFIRMED = "confirmed"  # payment verified server-side
-    EXPIRED = "expired"      # hold lapsed unpaid; dates released
+    EXPIRED = "expired"      # hold ended without confirmed payment; dates released
     CANCELLED = "cancelled"
 
 

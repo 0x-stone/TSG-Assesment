@@ -42,11 +42,16 @@
         Paystack has returned you to this page. Your payment is being verified.
         This page does not confirm your booking.
       </p>
-      <p><strong>Payment reference</strong></p>
-      <p class="reference">{{REFERENCE}}</p>
+      <p><strong>Paystack payment reference</strong></p>
+      <p class="reference">{{PAYMENT_REFERENCE}}</p>
+      <p><strong>Booking reference</strong></p>
+      <p class="reference">{{BOOKING_REFERENCE}}</p>
       <p class="note">
-        Please keep this reference. Check your booking status with your booking
-        provider before assuming your reservation is confirmed.
+        Use the booking reference when checking your reservation status with your
+        booking provider. The payment reference identifies the Paystack transaction.
+        Your payment is not confirmation; check the booking status before assuming
+        your reservation is confirmed. If the booking reference is not found, contact
+        your booking provider and share the payment reference.
       </p>
     </main>
   </body>

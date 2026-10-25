@@ -129,15 +129,33 @@ async def initialize_payment(req: InitializePaymentRequest, db: DB):
         "PAYSTACK_CALLBACK_URL to this route's public URL."
     ),
 )
-async def payment_return(reference: str = Query(default="")) -> HTMLResponse:
+async def payment_return(
+    db: DB,
+    reference: str = Query(default=""),
+    trxref: str = Query(default=""),
+) -> HTMLResponse:
+    payment_reference = reference or trxref
     log.info(
-        "API request endpoint=/payments/return reference=%r",
-        reference or None,
+        "API request endpoint=/payments/return payment_reference=%r",
+        payment_reference or None,
     )
     page = PAYMENT_RETURN_PAGE.read_text(encoding="utf-8")
-    safe_reference = html.escape(reference) if reference else "Not provided"
+    safe_payment_reference = (
+        html.escape(payment_reference) if payment_reference else "Not provided"
+    )
+    booking_reference = (
+        await service.booking_reference_for_payment(db, payment_reference)
+        if payment_reference
+        else None
+    )
+    safe_booking_reference = (
+        html.escape(booking_reference) if booking_reference else "Not found"
+    )
     return HTMLResponse(
-        content=page.replace("{{REFERENCE}}", safe_reference),
+        content=(
+            page.replace("{{PAYMENT_REFERENCE}}", safe_payment_reference)
+            .replace("{{BOOKING_REFERENCE}}", safe_booking_reference)
+        ),
         headers={"Cache-Control": "no-store"},
     )
 
@@ -175,7 +193,7 @@ async def paystack_webhook(request: Request, db: DB) -> dict:
         log.info("API webhook duplicate_ignored event_id=%s", event_id)
         return {"status": "duplicate_ignored"}
     outcome = "ignored"
-    if event_type == "charge.success" and data.get("reference"):
+    if event_type in ("charge.success", "charge.failed") and data.get("reference"):
         # Re-verify with Paystack rather than trusting the payload.
         # If this raises (502), the event stays unprocessed so Paystack's retry works.
         outcome = await service.reconcile(db, data["reference"])

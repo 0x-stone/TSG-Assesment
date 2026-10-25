@@ -11,7 +11,6 @@ from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
 
 import aiosqlite
-import httpx
 
 from . import paystack
 from .database import connect, iso, write_tx
@@ -88,19 +87,6 @@ def naira(kobo: int) -> str:
 
 def _wat(ts: str) -> str:
     return datetime.fromisoformat(ts).astimezone(WAT).strftime("%H:%M WAT")
-
-
-async def alert_host(message: str) -> None:
-    """Escalation hook. Logs always; posts to a Slack/Discord-style webhook if set."""
-    log.warning("HOST ALERT: %s", message)
-    url = os.getenv("HOST_ALERT_WEBHOOK_URL")
-    if not url:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(url, json={"text": message, "content": message})
-    except httpx.HTTPError:
-        log.exception("Could not deliver host alert")
 
 
 # ------------------------------------------------------------ inventory
@@ -351,21 +337,32 @@ async def start_payment(db: aiosqlite.Connection, reference: str) -> CreatePayme
 async def _settle_tx(
     db: aiosqlite.Connection, pay_ref: str, provider_status: str | None,
     paid_kobo: int | None, currency: str | None,
-) -> tuple[str, str | None]:
-    """Returns (outcome, host_alert_or_None). Safe to call any number of times."""
+) -> str:
+    """Settle a verified payment. Safe to call any number of times."""
     now = utcnow()
     async with write_tx(db):
         p = await _one(db, "SELECT * FROM payments WHERE paystack_reference = ?", (pay_ref,))
         if p is None:
-            return "unknown_reference", None
+            return "unknown_reference"
         if p["status"] in ("success", "requires_resolution"):
-            return "already_processed", None
+            return "already_processed"
         if provider_status in ("failed", "reversed", "abandoned"):
             new = "abandoned" if provider_status == "abandoned" else "failed"
             await db.execute("UPDATE payments SET status = ? WHERE id = ?", (new, p["id"]))
-            return new, None
+            pending = await _one(
+                db,
+                "SELECT 1 FROM payments WHERE booking_id = ? AND status = 'pending' LIMIT 1",
+                (p["booking_id"],),
+            )
+            if pending is None:
+                await db.execute(
+                    "UPDATE bookings SET status = 'expired' "
+                    "WHERE id = ? AND status = 'held'",
+                    (p["booking_id"],),
+                )
+            return new
         if provider_status != "success":
-            return "pending", None
+            return "pending"
 
         b = await _one(db, "SELECT * FROM bookings WHERE id = ?", (p["booking_id"],))
         problem = None
@@ -394,28 +391,21 @@ async def _settle_tx(
                 "UPDATE payments SET status = 'success', paid_amount_kobo = ?, verified_at = ? WHERE id = ?",
                 (paid_kobo, iso(now), p["id"]),
             )
-            return "confirmed", None
+            return "confirmed"
 
         await db.execute(
             "UPDATE payments SET status = 'requires_resolution', paid_amount_kobo = ?,"
             " verified_at = ?, note = ? WHERE id = ?",
             (paid_kobo, iso(now), problem, p["id"]),
         )
-        alert = (
-            f"Payment {pay_ref} ({naira(paid_kobo or 0)}) for booking {b['reference']} "
-            f"needs manual resolution: {problem}. Refund or rebook the guest."
-        )
-        return "requires_resolution", alert
+        return "requires_resolution"
 
 
 async def settle_payment(
     db: aiosqlite.Connection, pay_ref: str, provider_status: str | None,
     paid_kobo: int | None, currency: str | None,
 ) -> str:
-    outcome, alert = await _settle_tx(db, pay_ref, provider_status, paid_kobo, currency)
-    if alert:  # after commit, so a slow alert never holds the write lock
-        await alert_host(alert)
-    return outcome
+    return await _settle_tx(db, pay_ref, provider_status, paid_kobo, currency)
 
 
 async def reconcile(db: aiosqlite.Connection, pay_ref: str) -> str:
@@ -464,14 +454,18 @@ def _message(row, status: BookingStatus, pay: PaymentStatus | None) -> str:
     if status == BookingStatus.HELD:
         until = _wat(row["hold_expires_at"])
         if pay == PaymentStatus.FAILED:
-            return f"Your last payment attempt failed. The dates are still held until {until}; you can try again."
+            return (
+                f"A payment attempt failed. The dates remain held until {until} "
+                "while another payment attempt is pending."
+            )
         if pay == PaymentStatus.PENDING:
             return f"Dates held until {until}. Waiting for payment; it is not confirmed yet."
         return f"Dates held until {until}. No payment link has been created yet."
     if status == BookingStatus.EXPIRED:
         return (
-            "The hold on these dates expired and no payment was confirmed. If you already paid, "
-            "it may still be processing; check again shortly. Otherwise start a new booking."
+            "The hold on these dates has been released and no payment was confirmed. "
+            "If you already paid, it may still be processing; check again shortly. "
+            "Otherwise start a new booking."
         )
     return "This booking was cancelled."
 
@@ -529,6 +523,18 @@ async def latest_payment_ref(db: aiosqlite.Connection, booking_reference: str) -
     if row is None:
         raise NotFound("No payment exists for that booking.")
     return row["paystack_reference"], row["amount_kobo"]
+
+
+async def booking_reference_for_payment(
+    db: aiosqlite.Connection, paystack_reference: str
+) -> str | None:
+    row = await _one(
+        db,
+        "SELECT b.reference FROM bookings b JOIN payments p ON p.booking_id = b.id "
+        "WHERE p.paystack_reference = ?",
+        (paystack_reference,),
+    )
+    return row["reference"] if row is not None else None
 
 
 async def force_expire(db: aiosqlite.Connection, booking_reference: str) -> None:
