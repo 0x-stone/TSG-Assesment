@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <title>Payment update</title>
+    <style>
+      body {
+        align-items: center;
+        background: #f4f6f8;
+        color: #17212b;
+        display: flex;
+        font-family: system-ui, sans-serif;
+        justify-content: center;
+        margin: 0;
+        min-height: 100vh;
+      }
+      main {
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px #17212b1a;
+        margin: 24px;
+        max-width: 520px;
+        padding: 36px;
+        width: 100%;
+      }
+      h1 { margin-top: 0; }
+      .reference {
+        background: #f4f6f8;
+        border-radius: 6px;
+        overflow-wrap: anywhere;
+        padding: 12px;
+      }
+      .note { color: #52606d; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Payment update</h1>
+      <p class="note">
+        Paystack has returned you to this page. Your payment is being verified.
+        This page does not confirm your booking.
+      </p>
+      <p><strong>Payment reference</strong></p>
+      <p class="reference">{{REFERENCE}}</p>
+      <p class="note">
+        Please keep this reference. Check your booking status with your booking
+        provider before assuming your reservation is confirmed.
+      </p>
+    </main>
+  </body>
+</html>
